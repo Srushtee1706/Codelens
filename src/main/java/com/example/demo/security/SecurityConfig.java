@@ -14,18 +14,10 @@ public class SecurityConfig {
     ) throws Exception {
 
         http
-            .csrf(csrf -> csrf.disable())
-
-            .authorizeHttpRequests(auth -> auth
-
-                // GitHub webhook uses HMAC authentication
-                .requestMatchers("/api/webhooks/github")
-                .permitAll()
-
-                // Other endpoints require authentication
-                .anyRequest()
-                .authenticated()
-            );
+                .csrf(csrf -> csrf.disable())
+                .authorizeHttpRequests(auth -> auth
+                        .anyRequest().permitAll()
+                );
 
         return http.build();
     }

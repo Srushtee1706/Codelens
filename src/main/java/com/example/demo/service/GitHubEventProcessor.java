@@ -23,29 +23,67 @@ public class GitHubEventProcessor {
         this.eventService = eventService;
     }
 
+
     // =================================================
     // MAIN EVENT PROCESSOR
     // =================================================
 
     public void process(
             String eventType,
+            String deliveryId,
             String payload
     ) throws Exception {
 
-        // Convert JSON string into JsonNode
+        // -----------------------------------------
+        // IDEMPOTENCY CHECK
+        // -----------------------------------------
+        // GitHub sends a unique delivery ID with
+        // every webhook request.
+        //
+        // If we have already processed this delivery ID,
+        // we should not process the same event again.
+        // -----------------------------------------
+
+        if (eventService.existsByDeliveryId(deliveryId)) {
+
+            System.out.println(
+                    "Duplicate webhook ignored. Delivery ID: "
+                            + deliveryId
+            );
+
+            return;
+        }
+
+
+        // -----------------------------------------
+        // Parse JSON payload
+        // -----------------------------------------
+
         JsonNode json =
                 objectMapper.readTree(payload);
 
-        // Create our internal event object
+
         GitHubEvent event =
                 new GitHubEvent();
 
+
+        // -----------------------------------------
+        // Store delivery ID
+        // -----------------------------------------
+
+        event.setDeliveryId(deliveryId);
+
+
+        // -----------------------------------------
         // Common fields
+        // -----------------------------------------
+
         event.setEventType(eventType);
 
         event.setReceivedAt(
                 Instant.now()
         );
+
 
         // -----------------------------------------
         // Extract action
@@ -57,6 +95,7 @@ public class GitHubEventProcessor {
                     json.get("action").asString()
             );
         }
+
 
         // -----------------------------------------
         // Handle Pull Request event
@@ -70,6 +109,7 @@ public class GitHubEventProcessor {
             );
         }
 
+
         // -----------------------------------------
         // Handle Push event
         // -----------------------------------------
@@ -81,6 +121,7 @@ public class GitHubEventProcessor {
                     event
             );
         }
+
 
         // -----------------------------------------
         // Handle Workflow Run event
@@ -94,11 +135,13 @@ public class GitHubEventProcessor {
             );
         }
 
+
         // -----------------------------------------
         // Save event to MongoDB
         // -----------------------------------------
 
         eventService.saveEvent(event);
+
 
         // -----------------------------------------
         // Debugging
@@ -106,6 +149,11 @@ public class GitHubEventProcessor {
 
         System.out.println(
                 "Event processed successfully"
+        );
+
+        System.out.println(
+                "Delivery ID: "
+                        + event.getDeliveryId()
         );
 
         System.out.println(
@@ -149,6 +197,16 @@ public class GitHubEventProcessor {
         );
 
         System.out.println(
+                "Commit SHA: "
+                        + event.getCommitSha()
+        );
+
+        System.out.println(
+                "Commit Time: "
+                        + event.getCommitTime()
+        );
+
+        System.out.println(
                 "Workflow Name: "
                         + event.getWorkflowName()
         );
@@ -164,13 +222,23 @@ public class GitHubEventProcessor {
         );
 
         System.out.println(
-                "Commit SHA: "
-                        + event.getCommitSha()
+                "Deployment: "
+                        + event.getDeployment()
         );
 
         System.out.println(
-                "Deployment: "
-                        + event.getDeployment()
+                "Deployment Time: "
+                        + event.getDeploymentTime()
+        );
+
+        System.out.println(
+                "Failure Time: "
+                        + event.getFailureTime()
+        );
+
+        System.out.println(
+                "Recovered At: "
+                        + event.getRecoveredAt()
         );
     }
 
@@ -191,6 +259,7 @@ public class GitHubEventProcessor {
             return;
         }
 
+
         // -----------------------------------------
         // Developer
         // -----------------------------------------
@@ -206,6 +275,7 @@ public class GitHubEventProcessor {
             );
         }
 
+
         // -----------------------------------------
         // Pull Request Number
         // -----------------------------------------
@@ -219,6 +289,7 @@ public class GitHubEventProcessor {
             );
         }
 
+
         // -----------------------------------------
         // Merged Status
         // -----------------------------------------
@@ -231,6 +302,7 @@ public class GitHubEventProcessor {
                             .asBoolean()
             );
         }
+
 
         // -----------------------------------------
         // Repository
@@ -277,6 +349,7 @@ public class GitHubEventProcessor {
             );
         }
 
+
         // -----------------------------------------
         // Developer / Pusher
         // -----------------------------------------
@@ -288,11 +361,10 @@ public class GitHubEventProcessor {
                 && pusher.has("name")) {
 
             event.setDeveloper(
-                    pusher
-                            .get("name")
-                            .asString()
+                    pusher.get("name").asString()
             );
         }
+
 
         // -----------------------------------------
         // Branch
@@ -304,14 +376,14 @@ public class GitHubEventProcessor {
                     json.get("ref").asString();
 
             /*
-             Example:
-
-             refs/heads/main
-
-             We only want:
-
-             main
-            */
+             * Example:
+             *
+             * refs/heads/main
+             *
+             * We only want:
+             *
+             * main
+             */
 
             if (ref.startsWith("refs/heads/")) {
 
@@ -323,6 +395,7 @@ public class GitHubEventProcessor {
                 event.setBranch(branch);
             }
         }
+
 
         // -----------------------------------------
         // Commit Count
@@ -337,6 +410,49 @@ public class GitHubEventProcessor {
             event.setCommitCount(
                     commits.size()
             );
+
+
+            // -----------------------------------------
+            // Latest Commit
+            // -----------------------------------------
+
+            if (commits.size() > 0) {
+
+                JsonNode latestCommit =
+                        commits.get(
+                                commits.size() - 1
+                        );
+
+
+                // -----------------------------------------
+                // Commit SHA
+                // -----------------------------------------
+
+                if (latestCommit.has("id")) {
+
+                    event.setCommitSha(
+                            latestCommit
+                                    .get("id")
+                                    .asString()
+                    );
+                }
+
+
+                // -----------------------------------------
+                // Commit Time
+                // -----------------------------------------
+
+                if (latestCommit.has("timestamp")) {
+
+                    event.setCommitTime(
+                            Instant.parse(
+                                    latestCommit
+                                            .get("timestamp")
+                                            .asString()
+                            )
+                    );
+                }
+            }
 
         } else {
 
@@ -371,6 +487,7 @@ public class GitHubEventProcessor {
             );
         }
 
+
         // -----------------------------------------
         // Workflow Run
         // -----------------------------------------
@@ -381,6 +498,7 @@ public class GitHubEventProcessor {
         if (workflowRun == null) {
             return;
         }
+
 
         // -----------------------------------------
         // Workflow Name
@@ -410,6 +528,7 @@ public class GitHubEventProcessor {
             }
         }
 
+
         // -----------------------------------------
         // Workflow Status
         // -----------------------------------------
@@ -422,6 +541,7 @@ public class GitHubEventProcessor {
                             .asString()
             );
         }
+
 
         // -----------------------------------------
         // Workflow Conclusion
@@ -436,6 +556,62 @@ public class GitHubEventProcessor {
             );
         }
 
+
+        // -----------------------------------------
+        // Deployment Time + MTTR
+        // -----------------------------------------
+
+        if (workflowRun.has("updated_at")) {
+
+            Instant workflowTime =
+                    Instant.parse(
+                            workflowRun
+                                    .get("updated_at")
+                                    .asString()
+                    );
+
+            // Only deployment workflows should
+            // contribute to deployment metrics.
+
+            if (Boolean.TRUE.equals(
+                    event.getDeployment()
+            )) {
+
+                event.setDeploymentTime(
+                        workflowTime
+                );
+
+
+                // -----------------------------------------
+                // Failed Deployment
+                // -----------------------------------------
+
+                if ("failure".equalsIgnoreCase(
+                        event.getWorkflowConclusion()
+                )) {
+
+                    event.setFailureTime(
+                            workflowTime
+                    );
+                }
+
+
+                // -----------------------------------------
+                // Successful Deployment
+                // -----------------------------------------
+
+                if ("success".equalsIgnoreCase(
+                        event.getWorkflowConclusion()
+                )) {
+
+                    event.setRecoveredAt(
+                            workflowTime
+                    );
+                }
+            }
+        }
+
+
         // -----------------------------------------
         // Branch
         // -----------------------------------------
@@ -448,6 +624,7 @@ public class GitHubEventProcessor {
                             .asString()
             );
         }
+
 
         // -----------------------------------------
         // Commit SHA

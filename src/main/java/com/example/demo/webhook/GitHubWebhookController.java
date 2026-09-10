@@ -31,15 +31,23 @@ public class GitHubWebhookController {
             @RequestHeader("X-Hub-Signature-256")
             String githubSignature,
 
+            @RequestHeader("X-GitHub-Delivery")
+            String deliveryId,
+
             @RequestBody String payload
+
     ) {
 
-        // 1. Verify HMAC
-        boolean valid = HmacUtil.isValid(
-                payload,
-                webhookSecret,
-                githubSignature
-        );
+        // -----------------------------------------
+        // STEP 1: Verify webhook signature
+        // -----------------------------------------
+
+        boolean valid =
+                HmacUtil.isValid(
+                        payload,
+                        webhookSecret,
+                        githubSignature
+                );
 
         if (!valid) {
 
@@ -48,17 +56,21 @@ public class GitHubWebhookController {
                     .body("Invalid webhook signature");
         }
 
-        // 2. Process event
+
+        // -----------------------------------------
+        // STEP 2: Process webhook
+        // -----------------------------------------
+
         try {
 
             eventProcessor.process(
                     eventType,
+                    deliveryId,
                     payload
             );
 
-            return ResponseEntity.ok(
-                    "Webhook processed and saved"
-            );
+            return ResponseEntity
+                    .ok("Webhook processed and saved");
 
         } catch (Exception e) {
 
